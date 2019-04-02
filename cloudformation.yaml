@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWS CloudFormation template to launch apache webserver and serve html file
+Parameters:
+  KeyPair:
+    Description: KeyPair name
+    Type: String
+Resources:
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      CidrBlock: 10.0.0.0/16
+  PublicSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.0.0/24
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+  VPCGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+  PublicRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetNetworkAclAssociation:
+    Type: 'AWS::EC2::SubnetNetworkAclAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      NetworkAclId: !GetAtt 
+        - VPC
+        - DefaultNetworkAcl
+  WebServerSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable HTTP ingress
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '443'
+          ToPort: '443'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+  WebServerInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-8c1be5f6
+      NetworkInterfaces:
+        - GroupSet:
+            - !Ref WebServerSecurityGroup
+          AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          DeleteOnTermination: 'true'
+          SubnetId: !Ref PublicSubnet
+      KeyName: !Ref KeyPair
+      UserData: !Base64 
+        'Fn::Join':
+          - |+
+
+          - - |
+              #!/bin/bash 
+            - sudo yum update -y
+            - sudo yum install httpd -y
+            - sudo /etc/init.d/httpd start
+            - >-
+              echo "<html><head><title>Hello World</title></head><body><h1>Hello
+              World!</h1></body></html>" > /var/www/html/index.html
+            - >-
+              echo "<VirtualHost _default_:80>" >
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "DocumentRoot "/var/www/html"" >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "RewriteEngine On " >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "RewriteCond %{HTTPS} !=on " >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "RewriteRule ^/(.*) https://%{SERVER_NAME}/$1 [R,L] " >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "</VirtualHost> " >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "<VirtualHost *:443> " >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "ServerName www.abc.com " >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "ServerAlias abc.com " >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "DocumentRoot /var/www/html " >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "SSLEngine on " >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "SSLCertificateFile /etc/apache2/ssl/abc/apache.crt" >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "SSLCertificateKeyFile /etc/apache2/ssl/abc/apache.key" >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - >-
+              echo "</VirtualHost>" >>
+              /etc/apache2/sites-enabled/000-default.conf
+            - sudo /etc/init.d/httpd restart
+Outputs:
+  URL:
+    Description: URL of the website
+    Value: !Join 
+      - ''
+      - - 'https://'
+        - !GetAtt 
+          - WebServerInstance
+          - PublicDnsName
